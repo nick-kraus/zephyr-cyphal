@@ -1,0 +1,7 @@
+name: zyphal
+
+build:
+  # Path to the module Kconfig file, relative to the root of this repo.
+  kconfig: Kconfig
+  # Path to the folder containing CMakeLists.txt, relative to the root of this repo.
+  cmake: .

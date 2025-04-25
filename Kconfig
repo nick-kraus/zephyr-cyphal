@@ -1,0 +1,4 @@
+config ZYPHAL
+    bool "Enable Zyphal"
+    help
+        This option enables support for a Zephyr Cyphal stack. 
