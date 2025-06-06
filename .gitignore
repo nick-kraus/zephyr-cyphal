@@ -1,0 +1,78 @@
+# Build directories
+build/
+build-*/
+
+# CMake and ninja cache
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Ninja build system
+.ninja_deps
+.ninja_log
+rules.ninja
+
+# Zephyr-specific generated files
+*.config
+*.dts
+*.elf
+*.hex
+*.map
+*.bin
+*.uf2
+*.lst
+
+# Logs and debug output
+*.log
+*.trace
+gmon.out
+
+# Kconfig
+Kconfig.auto*
+autoconf.h
+isr_tables.c
+device_extern.h
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Doxygen
+doc/html/
+doc/latex/
+
+# VSCode
+.vscode/
+.vscode/settings.json
+
+# CLion / JetBrains IDEs
+.idea/
+cmake-build-*/
+
+# Backup and temporary files
+*~
+*.swp
+*.bak
+*.tmp
+*.orig
+*.rej
+
+# Git submodule artifacts (optional)
+*.submodule/
+
+# Coverity or static analysis
+coverity/
+
+# Test output
+test_output/
+
+# Generated documentation or artifacts
+output/
+out/
+docs/_build/
+
+# Misc
+.DS_Store
+Thumbs.db

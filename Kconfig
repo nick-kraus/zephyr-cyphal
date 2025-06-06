@@ -1,4 +1,6 @@
-config ZYPHAL
-    bool "Enable Zyphal"
+config ZCYPHAL
+    bool "Enable Cyphal"
+    depends on CAN
+    select CRC
     help
-        This option enables support for a Zephyr Cyphal stack. 
+        This option enables support for a Zephyr Cyphal stack.

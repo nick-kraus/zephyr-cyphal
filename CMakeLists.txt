@@ -1,11 +1,10 @@
-if(CONFIG_ZYPHAL)
+if(CONFIG_ZCYPHAL)
+
+    zephyr_include_directories("inc/")
 
     zephyr_library()
-
     zephyr_library_sources(
         "src/core.c"
     )
-
-    zephyr_library_include_directories("inc/")
 
 endif()
