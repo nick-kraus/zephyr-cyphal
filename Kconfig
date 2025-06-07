@@ -4,3 +4,13 @@ config ZCYPHAL
     select CRC
     help
         This option enables support for a Zephyr Cyphal stack.
+
+if ZCYPHAL
+
+    config ZCYPHAL_CAN_FD
+        bool "Enable Cyphal CAN FD support"
+        depends on CAN_FD_MODE
+        help
+            Enables support for Cyphal over CAN FD, allows for a maximum frame MTU of 64 bytes.
+
+endif

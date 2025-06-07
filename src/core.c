@@ -12,8 +12,8 @@ LOG_MODULE_REGISTER(cyphal, CONFIG_CAN_LOG_LEVEL);
 #define CYPHAL_MAX_NODE_ID (127)
 #define CYPHAL_MAX_SERVICE_ID (511)
 #define CYPHAL_MAX_SUBJECT_ID (8191)
-/* TODO: add support for CAN-FD. */
-#define CYPHAL_FRAME_MTU (8)
+
+#define CYPHAL_FRAME_MTU COND_CODE_1(CONFIG_ZCYPHAL_CAN_FD, (64), (8))
 
 static int32_t zcy_make_canid(uint8_t priority,
                               bool is_service,
@@ -131,13 +131,19 @@ static void zcy_tx_work_handler(struct k_work* work) {
 
     struct can_frame frame;
     frame.id = xfer->id;
-    frame.flags = CAN_FRAME_IDE;
+    frame.flags =
+        CAN_FRAME_IDE | COND_CODE_1(ZCYPHAL_CAN_FD, (CAN_FRAME_FDF | CAN_FRAME_BRS), (0));
 
     /* Write as much remaining payload as possible. */
     uint8_t frame_payload_len = 0;
     if (payload_remaining > 0) {
         frame_payload_len = MIN(payload_remaining, (CYPHAL_FRAME_MTU - 1));
         memcpy(frame.data, &xfer->payload[xfer->payload_written], frame_payload_len);
+
+        if (!start || !end) {
+            xfer->crc = crc16_itu_t(
+                xfer->crc, &xfer->payload[xfer->payload_written], frame_payload_len);
+        }
     }
 
     /* (Maybe) Write padding if this is the final frame. */
@@ -147,6 +153,9 @@ static void zcy_tx_work_handler(struct k_work* work) {
         uint8_t frame_len = start ? frame_payload_len + 1 : frame_payload_len + 3;
         frame_padding_len = can_dlc_to_bytes(can_bytes_to_dlc(frame_len)) - frame_len;
         memset(&frame.data[frame_payload_len], 0, frame_padding_len);
+
+        xfer->crc =
+            crc16_itu_t(xfer->crc, &frame.data[frame_payload_len], frame_padding_len);
     }
 
     /* (Maybe) Write CRC if entire payload is written. */
@@ -272,7 +281,7 @@ int32_t zcy_publish(zcy_publisher_t* pub,
     pub->xfer.transfer_id = (pub->xfer.transfer_id + 1) & 0x1F;
     pub->xfer.crc_written = 0;
     /* Only generate CRC for multi-frame transfers. */
-    pub->xfer.crc = num_frames == 1 ? 0 : crc16_itu_t(0xFFFF, payload, len);
+    pub->xfer.crc = 0xFFFF;
     pub->xfer.done = done;
 
     ret = k_mutex_lock(&inst->mutex, timeout);

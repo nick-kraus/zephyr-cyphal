@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdlib.h>
 #include <zephyr/drivers/can/can_fake.h>
 #include <zephyr/kernel.h>
@@ -10,6 +11,9 @@ DEFINE_FFF_GLOBALS;
 
 #define NODE_ID (0x55)
 #define SUBJECT_ID (0x1234)
+
+#define FILL_VAL(len, val) ((uint8_t)(val))
+#define FILL_ARRAY(len, val) LISTIFY(len, FILL_VAL, (, ), val)
 
 const struct device* canbus = DEVICE_DT_GET(DT_NODELABEL(fake_can));
 zcy_inst_t inst;
@@ -26,19 +30,28 @@ ZTEST(publish, test_single_frame) {
     zassert_ok(zcy_publisher_init(&pub, &inst, SUBJECT_ID));
 
     /* Maximum sized single frame. */
-    uint8_t pl1[] = {1, 2, 3, 4, 5, 6, 7};
-    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl1, 7, K_MSEC(10)));
+    uint8_t pl1[] = {FILL_ARRAY(63, 0x11)};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl1, 63, K_MSEC(10)));
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {1, 2, 3, 4, 5, 6, 7, 0xE0}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x11), 0xE0}});
+    can_fff_assert_frames_empty();
+
+    /* Single frame with padding. */
+    uint8_t pl2[] = {FILL_ARRAY(32, 0x22)};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl2, 32, K_MSEC(10)));
+    can_fff_assert_popped_frame_equal(
+        (struct can_frame){.id = 0x10723455,
+                           .dlc = 14,
+                           .data = {FILL_ARRAY(32, 0x22), FILL_ARRAY(15, 0), 0xE1}});
     can_fff_assert_frames_empty();
 
     /* Minimum sized single frame (no payload). */
-    uint8_t pl2[] = {};
-    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl2, 0, K_MSEC(10)));
+    uint8_t pl3[] = {};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl3, 0, K_MSEC(10)));
     can_fff_assert_popped_frame_equal((struct can_frame){.id = 0x10723455,
                                                          .dlc = 1,
                                                          .data = {
-                                                             0xE1,
+                                                             0xE2,
                                                          }});
     can_fff_assert_frames_empty();
 }
@@ -79,36 +92,47 @@ ZTEST(publish, test_multi_frame) {
     zassert_ok(zcy_publisher_init(&pub, &inst, SUBJECT_ID));
 
     /* Three full frames. */
-    uint8_t pl1[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
-    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl1, 19, K_MSEC(10)));
+    uint8_t pl1[] = {FILL_ARRAY(187, 0x33)};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl1, 187, K_MSEC(10)));
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {1, 2, 3, 4, 5, 6, 7, 0xA0}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x33), 0xA0}});
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {8, 9, 10, 11, 12, 13, 14, 0x00}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x33), 0x00}});
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {15, 16, 17, 18, 19, 0x1F, 0xAD, 0x60}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(61, 0x33), 0x95, 0x90, 0x60}});
     can_fff_assert_frames_empty();
 
-    /* CRC by itself on last frame. */
-    uint8_t pl2[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
-    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl2, 14, K_MSEC(10)));
+    /* Three frames, CRC by itself on last frame. */
+    uint8_t pl2[] = {FILL_ARRAY(126, 0x44)};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl2, 126, K_MSEC(10)));
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {1, 2, 3, 4, 5, 6, 7, 0xA1}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x44), 0xA1}});
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {8, 9, 10, 11, 12, 13, 14, 0x01}});
-    can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 3, .data = {0x32, 0xF8, 0x61}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x44), 0x01}});
+    can_fff_assert_popped_frame_equal(
+        (struct can_frame){.id = 0x10723455, .dlc = 3, .data = {0x27, 0xF0, 0x61}});
     can_fff_assert_frames_empty();
 
-    /* CRC split between frames. */
-    uint8_t pl3[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
-    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl3, 13, K_MSEC(10)));
+    /* Three frames, CRC split between frames. */
+    uint8_t pl3[] = {FILL_ARRAY(125, 0x55)};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl3, 125, K_MSEC(10)));
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {1, 2, 3, 4, 5, 6, 7, 0xA2}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x55), 0xA2}});
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 8, .data = {8, 9, 10, 11, 12, 13, 0xF9, 0x02}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(62, 0x55), 0xEE, 0x02}});
+    can_fff_assert_popped_frame_equal(
+        (struct can_frame){.id = 0x10723455, .dlc = 2, .data = {0x63, 0x62}});
+    can_fff_assert_frames_empty();
+
+    /* Two frames, CRC after padding. */
+    uint8_t pl4[] = {FILL_ARRAY(81, 0x66)};
+    zassert_ok(zcy_publish_sync(&pub, ZCY_PRIO_NOMINAL, pl4, 81, K_MSEC(10)));
     can_fff_assert_popped_frame_equal((struct can_frame){
-        .id = 0x10723455, .dlc = 2, .data = {0xAD, 0x62}});
+        .id = 0x10723455, .dlc = 15, .data = {FILL_ARRAY(63, 0x66), 0xA3}});
+    can_fff_assert_popped_frame_equal((struct can_frame){
+        .id = 0x10723455,
+        .dlc = 12,
+        .data = {FILL_ARRAY(18, 0x66), FILL_ARRAY(3, 0), 0xDE, 0x2D, 0x43}});
     can_fff_assert_frames_empty();
 }
 
