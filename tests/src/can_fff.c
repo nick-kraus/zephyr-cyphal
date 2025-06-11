@@ -3,7 +3,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/slist.h>
 #include <zephyr/ztest.h>
-#include "zephyr/ztest_assert.h"
 
 struct can_fff_history_item {
     struct can_frame frame;
