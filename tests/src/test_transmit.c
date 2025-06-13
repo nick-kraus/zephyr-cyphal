@@ -112,80 +112,57 @@ ZTEST(transmit, multi_frame_message) {
     can_fff_assert_frames_empty();
 }
 
+static void publish_done_cb(void* user_data, int32_t status) {
+    struct k_sem* sem = (struct k_sem*)user_data;
+    k_sem_give(sem);
+}
+
 ZTEST(transmit, priority_ordering) {
-    zyphal_tx_t tx1, tx2, tx3, tx4, tx5, tx6, tx7, tx8, tx9;
-    zassert_ok(zyphal_tx_init(&inst, &tx1));
-    zassert_ok(zyphal_tx_init(&inst, &tx2));
-    zassert_ok(zyphal_tx_init(&inst, &tx3));
-    zassert_ok(zyphal_tx_init(&inst, &tx4));
-    zassert_ok(zyphal_tx_init(&inst, &tx5));
-    zassert_ok(zyphal_tx_init(&inst, &tx6));
-    zassert_ok(zyphal_tx_init(&inst, &tx7));
-    zassert_ok(zyphal_tx_init(&inst, &tx8));
-    zassert_ok(zyphal_tx_init(&inst, &tx9));
+    zyphal_tx_t txs[9];
+    for (size_t i = 0; i < ARRAY_SIZE(txs); i++) {
+        zassert_ok(zyphal_tx_init(&inst, &txs[i]));
+    }
 
-    struct k_sem sem1, sem2, sem3, sem4, sem5, sem6, sem7, sem8, sem9;
-    zassert_ok(k_sem_init(&sem1, 0, 1));
-    zassert_ok(k_sem_init(&sem2, 0, 1));
-    zassert_ok(k_sem_init(&sem3, 0, 1));
-    zassert_ok(k_sem_init(&sem4, 0, 1));
-    zassert_ok(k_sem_init(&sem5, 0, 1));
-    zassert_ok(k_sem_init(&sem6, 0, 1));
-    zassert_ok(k_sem_init(&sem7, 0, 1));
-    zassert_ok(k_sem_init(&sem8, 0, 1));
-    zassert_ok(k_sem_init(&sem9, 0, 1));
+    struct k_sem sem;
+    zassert_ok(k_sem_init(&sem, 0, 9));
 
-    /* Publish all possible priorities, in reverse order. */
+    /* Publish all possible priorities in reverse order. */
     uint8_t payloads[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-    zassert_ok(zyphal_publish(
-        &tx1, ZYPHAL_PRIO_OPTIONAL, SUBJECT_ID, &payloads[0], 1, K_MSEC(10), &sem1));
-    zassert_ok(zyphal_publish(
-        &tx2, ZYPHAL_PRIO_SLOW, SUBJECT_ID, &payloads[1], 1, K_MSEC(10), &sem2));
-    zassert_ok(zyphal_publish(
-        &tx3, ZYPHAL_PRIO_LOW, SUBJECT_ID, &payloads[2], 1, K_MSEC(10), &sem3));
-    zassert_ok(zyphal_publish(
-        &tx4, ZYPHAL_PRIO_NOMINAL, SUBJECT_ID, &payloads[3], 1, K_MSEC(10), &sem4));
-    zassert_ok(zyphal_publish(
-        &tx5, ZYPHAL_PRIO_HIGH, SUBJECT_ID, &payloads[4], 1, K_MSEC(10), &sem5));
-    zassert_ok(zyphal_publish(
-        &tx6, ZYPHAL_PRIO_FAST, SUBJECT_ID, &payloads[5], 1, K_MSEC(10), &sem6));
-    zassert_ok(zyphal_publish(
-        &tx7, ZYPHAL_PRIO_IMMEDIATE, SUBJECT_ID, &payloads[6], 1, K_MSEC(10), &sem7));
-    zassert_ok(zyphal_publish(
-        &tx8, ZYPHAL_PRIO_EXCEPTIONAL, SUBJECT_ID, &payloads[7], 1, K_MSEC(10), &sem8));
-    /* This message should send after the other ZYPHAL_PRIO_NOMINAL message. */
-    zassert_ok(zyphal_publish(
-        &tx9, ZYPHAL_PRIO_NOMINAL, SUBJECT_ID, &payloads[8], 1, K_MSEC(10), &sem9));
+    uint8_t priorities[] = {ZYPHAL_PRIO_OPTIONAL,
+                            ZYPHAL_PRIO_SLOW,
+                            ZYPHAL_PRIO_LOW,
+                            ZYPHAL_PRIO_NOMINAL,
+                            ZYPHAL_PRIO_HIGH,
+                            ZYPHAL_PRIO_FAST,
+                            ZYPHAL_PRIO_IMMEDIATE,
+                            ZYPHAL_PRIO_EXCEPTIONAL,
+                            ZYPHAL_PRIO_NOMINAL};
+    for (size_t i = 0; i < ARRAY_SIZE(txs); i++) {
+        zassert_ok(zyphal_publish(&txs[i],
+                                  priorities[i],
+                                  SUBJECT_ID,
+                                  &payloads[i],
+                                  1,
+                                  K_MSEC(10),
+                                  publish_done_cb,
+                                  &sem));
+    }
 
-    k_sem_take(&sem1, K_FOREVER);
-    k_sem_take(&sem2, K_FOREVER);
-    k_sem_take(&sem3, K_FOREVER);
-    k_sem_take(&sem4, K_FOREVER);
-    k_sem_take(&sem5, K_FOREVER);
-    k_sem_take(&sem6, K_FOREVER);
-    k_sem_take(&sem7, K_FOREVER);
-    k_sem_take(&sem8, K_FOREVER);
-    k_sem_take(&sem9, K_FOREVER);
+    for (size_t i = 0; i < sem.limit; i++) { zassert_ok(k_sem_take(&sem, K_FOREVER)); }
 
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x723455, .dlc = 2, .data = {7, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x4723455, .dlc = 2, .data = {6, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x8723455, .dlc = 2, .data = {5, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0xC723455, .dlc = 2, .data = {4, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x10723455, .dlc = 2, .data = {3, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x10723455, .dlc = 2, .data = {8, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {2, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x18723455, .dlc = 2, .data = {1, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x1C723455, .dlc = 2, .data = {0, 0xE0}});
-    can_fff_assert_frames_empty();
+    struct can_frame expected_frames[] = {
+        {.id = 0x723455, .dlc = 2, .data = {7, 0xE0}},
+        {.id = 0x4723455, .dlc = 2, .data = {6, 0xE0}},
+        {.id = 0x8723455, .dlc = 2, .data = {5, 0xE0}},
+        {.id = 0xC723455, .dlc = 2, .data = {4, 0xE0}},
+        {.id = 0x10723455, .dlc = 2, .data = {3, 0xE0}},
+        {.id = 0x10723455, .dlc = 2, .data = {8, 0xE0}},
+        {.id = 0x14723455, .dlc = 2, .data = {2, 0xE0}},
+        {.id = 0x18723455, .dlc = 2, .data = {1, 0xE0}},
+        {.id = 0x1C723455, .dlc = 2, .data = {0, 0xE0}}};
+    for (size_t i = 0; i < ARRAY_SIZE(expected_frames); i++) {
+        can_fff_assert_popped_frame_equal(expected_frames[i]);
+    }
 }
 
 ZTEST(transmit, transfer_id) {
@@ -218,17 +195,21 @@ ZTEST(transmit, invalid_params) {
     zassert_ok(zyphal_tx_init(&inst, &tx));
 
     uint8_t payload[] = {1};
-    /* NULL publisher. */
+    /* NULL parameters. */
     zassert_equal(
-        zyphal_publish(NULL, ZYPHAL_PRIO_LOW, SUBJECT_ID, payload, 1, K_MSEC(10), NULL),
+        zyphal_publish_wait(NULL, ZYPHAL_PRIO_LOW, SUBJECT_ID, payload, 1, K_MSEC(10)),
         -EINVAL);
-    /* NULL payload. */
     zassert_equal(
-        zyphal_publish(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, NULL, 1, K_MSEC(10), NULL),
+        zyphal_publish_wait(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, NULL, 1, K_MSEC(10)),
         -EINVAL);
-    /* Invalid priority. */
-    zassert_equal(zyphal_publish(&tx, 8, SUBJECT_ID, payload, 1, K_MSEC(10), NULL),
+    /* Parameters out of range. */
+    zassert_equal(zyphal_publish_wait(
+                      &tx, ZYPHAL_PRIO_OPTIONAL + 1, SUBJECT_ID, payload, 1, K_MSEC(10)),
                   -EINVAL);
+    zassert_equal(
+        zyphal_publish_wait(
+            &tx, ZYPHAL_PRIO_LOW, ZYPHAL_MAX_SUBJECT_ID + 1, payload, 1, K_MSEC(10)),
+        -EINVAL);
 
     can_fff_assert_frames_empty();
 }
@@ -237,47 +218,31 @@ ZTEST(transmit, busy_transfer) {
     zyphal_tx_t tx;
     zassert_ok(zyphal_tx_init(&inst, &tx));
 
-    struct k_sem sem1, sem2;
-    zassert_ok(k_sem_init(&sem1, 0, 1));
-    zassert_ok(k_sem_init(&sem2, 0, 1));
+    struct k_sem sem;
+    zassert_ok(k_sem_init(&sem, 0, 1));
 
-    uint8_t pl1[] = {1};
-    uint8_t pl2[] = {2};
-
-    zassert_ok(
-        zyphal_publish(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl1, 1, K_MSEC(10), &sem1));
+    uint8_t pl[] = {1};
+    zassert_ok(zyphal_publish(
+        &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem));
     /* Transfer should fail with -EALREADY when first is still pending. */
     zassert_equal(
-        zyphal_publish(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl2, 1, K_MSEC(10), &sem2),
+        zyphal_publish(
+            &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem),
         -EALREADY);
+    zassert_true(zyphal_publish_pending(&tx));
 
     /* Once first transfer completes, second transfer should succeed. */
-    k_sem_take(&sem1, K_FOREVER);
-    zassert_ok(
-        zyphal_publish(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl2, 1, K_MSEC(10), &sem2));
-    k_sem_take(&sem2, K_FOREVER);
+    k_sem_take(&sem, K_FOREVER);
+    zassert_ok(zyphal_publish(
+        &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem));
+    k_sem_take(&sem, K_FOREVER);
+    zassert_false(zyphal_publish_pending(&tx));
 
     /* Verify both frames were sent. */
     can_fff_assert_popped_frame_equal(
         (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE0}});
     can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {2, 0xE1}});
-    can_fff_assert_frames_empty();
-}
-
-ZTEST(transmit, async_without_semaphore) {
-    zyphal_tx_t tx;
-    zassert_ok(zyphal_tx_init(&inst, &tx));
-
-    uint8_t payload[] = {1};
-    zassert_ok(
-        zyphal_publish(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, payload, 1, K_MSEC(10), NULL));
-
-    /* Give some time for async processing. */
-    k_msleep(10);
-
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE0}});
+        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE1}});
     can_fff_assert_frames_empty();
 }
 

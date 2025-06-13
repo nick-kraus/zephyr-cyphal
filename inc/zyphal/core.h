@@ -21,6 +21,8 @@ typedef enum {
     ZYPHAL_PRIO_OPTIONAL = 7,
 } zyphal_prio_t;
 
+typedef void (*zyphal_tx_done_cb_t)(void* user_data, int32_t status);
+
 /* TODO: Define members in private header. */
 typedef struct {
     /* CAN bus device used for communication. */
@@ -55,10 +57,9 @@ typedef struct {
     uint16_t crc;
     /* Number of frames pending transmit. */
     atomic_t pending;
-    /* Status of transfer, negative if an error. */
-    int32_t status;
-    /* Notifies the publishing thread on transfer completion. */
-    struct k_sem* done;
+    /* Called once full message has been transmitted. */
+    zyphal_tx_done_cb_t done_cb;
+    void* done_user_data;
 } zyphal_tx_t;
 
 /* Initializes a zyphal instance. */
@@ -74,7 +75,8 @@ int32_t zyphal_publish(zyphal_tx_t* tx,
                        uint8_t* payload,
                        size_t len,
                        k_timeout_t timeout,
-                       struct k_sem* done);
+                       zyphal_tx_done_cb_t cb,
+                       void* user_data);
 /* Publishes a message, returning once the message has been sent. */
 int32_t zyphal_publish_wait(zyphal_tx_t* tx,
                             zyphal_prio_t priority,
@@ -82,5 +84,7 @@ int32_t zyphal_publish_wait(zyphal_tx_t* tx,
                             uint8_t* payload,
                             size_t len,
                             k_timeout_t timeout);
+/* Returns true if a publish is currently pending. */
+bool zyphal_publish_pending(zyphal_tx_t* tx);
 
 #endif /* ZYPHAL_CORE_H */

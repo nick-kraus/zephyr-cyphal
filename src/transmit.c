@@ -140,18 +140,17 @@ static void tx_queue_push(zyphal_inst_t* inst, zyphal_tx_t* tx) {
     }
 }
 
-static void tx_queue_remove_head(zyphal_inst_t* inst) {
+static void tx_queue_remove_head(zyphal_inst_t* inst, int32_t status) {
     if (k_mutex_lock(&inst->mutex, K_NO_WAIT) < 0) { return; }
     sys_snode_t* node = sys_slist_get_not_empty(&inst->tx_queue);
     zyphal_tx_t* tx = SYS_SLIST_CONTAINER(node, tx, node);
 
     bool expired = sys_timepoint_expired(tx->end);
     bool pending = atomic_get(&tx->pending) > 0;
-    bool status_ok = tx->status == 0;
-    if (expired && pending && status_ok) { tx->status = -ETIMEDOUT; }
+    if (expired && pending && status == 0) { status = -ETIMEDOUT; }
     atomic_clear(&tx->pending);
 
-    if (tx->done) { k_sem_give(tx->done); }
+    if (tx->done_cb) { tx->done_cb(tx->done_user_data, status); }
     k_mutex_unlock(&inst->mutex);
 }
 
@@ -161,11 +160,9 @@ static zyphal_tx_t* tx_queue_get_next(zyphal_inst_t* inst) {
 
         bool expired = sys_timepoint_expired(tx->end);
         bool pending = atomic_get(&tx->pending) > 0;
-        if (!expired && pending) {
-            return tx;
-        }
-        
-        tx_queue_remove_head(inst);
+        if (!expired && pending) { return tx; }
+
+        tx_queue_remove_head(inst, 0);
     }
 
     return NULL;
@@ -174,9 +171,8 @@ static zyphal_tx_t* tx_queue_get_next(zyphal_inst_t* inst) {
 void can_send_callback(const struct device* dev, int error, void* user_data) {
     zyphal_tx_t* tx = (zyphal_tx_t*)user_data;
     atomic_val_t old = atomic_dec(&tx->pending);
-    tx->status = error;
 
-    if (error != 0 || old <= 1) { tx_queue_remove_head(tx->inst); }
+    if (error != 0 || old <= 1) { tx_queue_remove_head(tx->inst, error); }
 
     k_work_schedule(&tx->inst->tx_work, K_NO_WAIT);
 }
@@ -207,8 +203,7 @@ void zyphal_tx_work_handler(struct k_work* work) {
         goto end;
     } else if (ret < 0) {
         /* Fail the transfer.*/
-        tx->status = ret;
-        tx_queue_remove_head(inst);
+        tx_queue_remove_head(inst, ret);
         k_work_schedule(&inst->tx_work, K_NO_WAIT);
         goto end;
     }
@@ -245,7 +240,8 @@ int32_t zyphal_publish(zyphal_tx_t* tx,
                        uint8_t* payload,
                        size_t len,
                        k_timeout_t timeout,
-                       struct k_sem* done) {
+                       zyphal_tx_done_cb_t cb,
+                       void* user_data) {
     if (!tx || priority > ZYPHAL_PRIO_OPTIONAL || subject_id > ZYPHAL_MAX_SUBJECT_ID ||
         (!payload && len > 0)) {
         return -EINVAL;
@@ -270,10 +266,9 @@ int32_t zyphal_publish(zyphal_tx_t* tx,
     /* Increment transfer ID before pushing to queue. */
     tx->transfer_id = (tx->transfer_id + 1) & TAIL_TRANSFER_ID_MASK;
     tx->crc_written = 0;
-    /* Only generate CRC for multi-frame transfers. */
     tx->crc = UINT16_MAX;
-    tx->status = 0;
-    tx->done = done;
+    tx->done_cb = cb;
+    tx->done_user_data = user_data;
 
     int32_t ret = k_mutex_lock(&inst->mutex, timeout);
     if (ret < 0) { goto err; }
@@ -290,19 +285,36 @@ err:
     return ret;
 }
 
+struct publish_done_data {
+    struct k_sem sem;
+    int32_t status;
+};
+
+static void publish_done_cb(void* user_data, int32_t status) {
+    struct publish_done_data* data = (struct publish_done_data*)user_data;
+    data->status = status;
+    k_sem_give(&data->sem);
+}
+
 int32_t zyphal_publish_wait(zyphal_tx_t* tx,
                             zyphal_prio_t priority,
                             uint16_t subject_id,
                             uint8_t* payload,
                             size_t len,
                             k_timeout_t timeout) {
-    struct k_sem sem;
-    int32_t ret = k_sem_init(&sem, 0, 1);
+    struct publish_done_data data = {.status = 0};
+    int32_t ret = k_sem_init(&data.sem, 0, 1);
     if (ret < 0) { return ret; }
 
-    ret = zyphal_publish(tx, priority, subject_id, payload, len, timeout, &sem);
+    ret = zyphal_publish(
+        tx, priority, subject_id, payload, len, timeout, publish_done_cb, &data);
     if (ret < 0) { return ret; }
 
-    k_sem_take(&sem, K_FOREVER);
-    return tx->status;
+    k_sem_take(&data.sem, K_FOREVER);
+    return data.status;
+}
+
+bool zyphal_publish_pending(zyphal_tx_t* tx) {
+    if (!tx) { return false; }
+    return atomic_get(&tx->pending) > 0;
 }
