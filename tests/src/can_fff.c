@@ -27,18 +27,21 @@ static struct can_frame can_fff_frame_history_get_next(void) {
     return frame;
 }
 
+static volatile int32_t can_fff_send_custom_return_val = 0;
 static int32_t can_fff_send_custom(const struct device* dev,
                                    const struct can_frame* frame,
                                    k_timeout_t timeout,
                                    can_tx_callback_t callback,
                                    void* user_data) {
+    /* Add the received frame to the history. */
+    if (can_fff_send_custom_return_val == 0) {
+        can_fff_frame_history_append(frame);
+    }
+
     /* Running the callback will give a semaphore, preventing deadlock. */
     if (callback) { callback(dev, 0, user_data); }
 
-    /* Add the received frame to the history. */
-    can_fff_frame_history_append(frame);
-
-    return 0;
+    return can_fff_send_custom_return_val;
 }
 
 void can_fff_history_reset(void) {
@@ -82,4 +85,8 @@ void can_fff_assert_popped_frame_equal(struct can_frame frame) {
                       b,
                       hist.data[b]);
     }
+}
+
+void can_fff_set_send_status(int32_t status) {
+    can_fff_send_custom_return_val = status;
 }

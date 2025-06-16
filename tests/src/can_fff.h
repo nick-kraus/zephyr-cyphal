@@ -7,6 +7,8 @@
 void can_fff_ztest_before(void);
 /* Resets the history of saved CAN frames. */
 void can_fff_history_reset(void);
+/* Sets the returned status of send calls. */
+void can_fff_set_send_status(int32_t status);
 
 /* ZTest assertion helpers. */
 void can_fff_assert_frames_empty(void);

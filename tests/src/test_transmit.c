@@ -190,7 +190,72 @@ ZTEST(transmit, transfer_id) {
     can_fff_assert_frames_empty();
 }
 
-ZTEST(transmit, invalid_params) {
+ZTEST(transmit, busy_transfer) {
+    zyphal_tx_t tx;
+    zassert_ok(zyphal_tx_init(&inst, &tx));
+
+    struct k_sem sem;
+    zassert_ok(k_sem_init(&sem, 0, 1));
+
+    uint8_t pl[] = {1};
+    zassert_ok(zyphal_publish(
+        &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem));
+    /* Transfer should fail with -EALREADY when first is still pending. */
+    zassert_equal(
+        zyphal_publish(
+            &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem),
+        -EALREADY);
+    zassert_true(zyphal_tx_pending(&tx));
+
+    /* Once first transfer completes, second transfer should succeed. */
+    k_sem_take(&sem, K_FOREVER);
+    zassert_ok(zyphal_publish(
+        &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem));
+    k_sem_take(&sem, K_FOREVER);
+    zassert_false(zyphal_tx_pending(&tx));
+
+    /* Verify both frames were sent. */
+    can_fff_assert_popped_frame_equal(
+        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE0}});
+    can_fff_assert_popped_frame_equal(
+        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE1}});
+    can_fff_assert_frames_empty();
+}
+
+static void publish_done_canceled_cb(void* user_data, int32_t status) {
+    zassert_equal(status, -ECANCELED);
+    struct k_sem* sem = (struct k_sem*)user_data;
+    k_sem_give(sem);
+}
+
+ZTEST(transmit, cancel_transfer) {
+    zyphal_tx_t tx;
+    zassert_ok(zyphal_tx_init(&inst, &tx));
+
+    struct k_sem sem;
+    zassert_ok(k_sem_init(&sem, 0, 1));
+
+    uint8_t pl[] = {1};
+    zassert_ok(zyphal_publish(&tx,
+                              ZYPHAL_PRIO_LOW,
+                              SUBJECT_ID,
+                              pl,
+                              1,
+                              K_MSEC(10),
+                              publish_done_canceled_cb,
+                              &sem));
+    zassert_true(zyphal_tx_pending(&tx));
+
+    /* Cancel transfer. */
+    zassert_ok(zyphal_tx_cancel(&tx));
+    zassert_false(zyphal_tx_pending(&tx));
+    /* Callback should still be called for the canceled transfer. */
+    k_sem_take(&sem, K_FOREVER);
+    /* But canceled transfer should not send can frames. */
+    can_fff_assert_frames_empty();
+}
+
+ZTEST(transmit, errors) {
     zyphal_tx_t tx;
     zassert_ok(zyphal_tx_init(&inst, &tx));
 
@@ -210,39 +275,13 @@ ZTEST(transmit, invalid_params) {
         zyphal_publish_wait(
             &tx, ZYPHAL_PRIO_LOW, ZYPHAL_MAX_SUBJECT_ID + 1, payload, 1, K_MSEC(10)),
         -EINVAL);
-
-    can_fff_assert_frames_empty();
-}
-
-ZTEST(transmit, busy_transfer) {
-    zyphal_tx_t tx;
-    zassert_ok(zyphal_tx_init(&inst, &tx));
-
-    struct k_sem sem;
-    zassert_ok(k_sem_init(&sem, 0, 1));
-
-    uint8_t pl[] = {1};
-    zassert_ok(zyphal_publish(
-        &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem));
-    /* Transfer should fail with -EALREADY when first is still pending. */
+    /* CAN send errors. */
+    can_fff_set_send_status(-ENETDOWN);
     zassert_equal(
-        zyphal_publish(
-            &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem),
-        -EALREADY);
-    zassert_true(zyphal_publish_pending(&tx));
+        zyphal_publish_wait(&tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, payload, 1, K_MSEC(10)),
+        -ENETDOWN);
+    can_fff_set_send_status(0);
 
-    /* Once first transfer completes, second transfer should succeed. */
-    k_sem_take(&sem, K_FOREVER);
-    zassert_ok(zyphal_publish(
-        &tx, ZYPHAL_PRIO_LOW, SUBJECT_ID, pl, 1, K_MSEC(10), publish_done_cb, &sem));
-    k_sem_take(&sem, K_FOREVER);
-    zassert_false(zyphal_publish_pending(&tx));
-
-    /* Verify both frames were sent. */
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE0}});
-    can_fff_assert_popped_frame_equal(
-        (struct can_frame){.id = 0x14723455, .dlc = 2, .data = {1, 0xE1}});
     can_fff_assert_frames_empty();
 }
 

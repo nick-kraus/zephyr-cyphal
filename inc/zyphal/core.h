@@ -84,7 +84,10 @@ int32_t zyphal_publish_wait(zyphal_tx_t* tx,
                             uint8_t* payload,
                             size_t len,
                             k_timeout_t timeout);
-/* Returns true if a publish is currently pending. */
-bool zyphal_publish_pending(zyphal_tx_t* tx);
+
+/* Returns true if a transmission is currently pending. */
+bool zyphal_tx_pending(zyphal_tx_t* tx);
+/* Cancels a currently pending transmission. */
+int32_t zyphal_tx_cancel(zyphal_tx_t* tx);
 
 #endif /* ZYPHAL_CORE_H */

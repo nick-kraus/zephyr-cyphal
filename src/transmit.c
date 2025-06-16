@@ -140,10 +140,10 @@ static void tx_queue_push(zyphal_inst_t* inst, zyphal_tx_t* tx) {
     }
 }
 
-static void tx_queue_remove_head(zyphal_inst_t* inst, int32_t status) {
+static void tx_queue_remove(zyphal_inst_t* inst, zyphal_tx_t* tx, int32_t status) {
     if (k_mutex_lock(&inst->mutex, K_NO_WAIT) < 0) { return; }
-    sys_snode_t* node = sys_slist_get_not_empty(&inst->tx_queue);
-    zyphal_tx_t* tx = SYS_SLIST_CONTAINER(node, tx, node);
+
+    sys_slist_find_and_remove(&inst->tx_queue, &tx->node);
 
     bool expired = sys_timepoint_expired(tx->end);
     bool pending = atomic_get(&tx->pending) > 0;
@@ -162,7 +162,7 @@ static zyphal_tx_t* tx_queue_get_next(zyphal_inst_t* inst) {
         bool pending = atomic_get(&tx->pending) > 0;
         if (!expired && pending) { return tx; }
 
-        tx_queue_remove_head(inst, 0);
+        tx_queue_remove(inst, tx, 0);
     }
 
     return NULL;
@@ -172,7 +172,7 @@ void can_send_callback(const struct device* dev, int error, void* user_data) {
     zyphal_tx_t* tx = (zyphal_tx_t*)user_data;
     atomic_val_t old = atomic_dec(&tx->pending);
 
-    if (error != 0 || old <= 1) { tx_queue_remove_head(tx->inst, error); }
+    if (error != 0 || old <= 1) { tx_queue_remove(tx->inst, tx, error); }
 
     k_work_schedule(&tx->inst->tx_work, K_NO_WAIT);
 }
@@ -203,7 +203,7 @@ void zyphal_tx_work_handler(struct k_work* work) {
         goto end;
     } else if (ret < 0) {
         /* Fail the transfer.*/
-        tx_queue_remove_head(inst, ret);
+        tx_queue_remove(inst, tx, ret);
         k_work_schedule(&inst->tx_work, K_NO_WAIT);
         goto end;
     }
@@ -314,7 +314,23 @@ int32_t zyphal_publish_wait(zyphal_tx_t* tx,
     return data.status;
 }
 
-bool zyphal_publish_pending(zyphal_tx_t* tx) {
+bool zyphal_tx_pending(zyphal_tx_t* tx) {
     if (!tx) { return false; }
     return atomic_get(&tx->pending) > 0;
+}
+
+int32_t zyphal_tx_cancel(zyphal_tx_t* tx) {
+    zyphal_inst_t* inst = tx->inst;
+
+    int32_t ret = k_mutex_lock(&inst->mutex, K_NO_WAIT);
+    if (ret < 0) { return -EWOULDBLOCK; }
+
+    if (!zyphal_tx_pending(tx)) {
+        ret = -EALREADY;
+    } else {
+        tx_queue_remove(inst, tx, -ECANCELED);
+    }
+
+    k_mutex_unlock(&inst->mutex);
+    return ret;
 }
